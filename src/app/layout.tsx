@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import type { ReactNode } from "react";
 
 import "./globals.css";
 
@@ -19,7 +20,11 @@ export const metadata: Metadata = {
     "A focus lock that actually forces you to stay on one task. Distraction sites refuse to open. Done requires a real debrief.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: ReactNode;
+}>) {
   return (
     <html
       lang="en"

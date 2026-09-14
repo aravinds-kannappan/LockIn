@@ -6,18 +6,36 @@ Name one task. The machine goes into a full-screen lock: the desk is notes + a t
 
 This repo is a clickable Next.js demo. No auth, no database, no Chrome extension.
 
-## Run locally
+Verified on this machine with **Node v22.23.2** and **npm 10.9.8**.
+
+## Clone, install, run
 
 ```bash
+git clone git@github.com:aravinds-kannappan/LockIn.git
+cd LockIn
 npm install
 npm run dev
 ```
 
-Open [http://127.0.0.1:43211](http://127.0.0.1:43211). The dev server binds to `0.0.0.0:43211` so it is reachable from the preview.
+Then open [http://127.0.0.1:43211](http://127.0.0.1:43211). The dev server binds to `0.0.0.0:43211`.
+
+## Build
 
 ```bash
 npm run build
-npm run start -- --hostname 0.0.0.0 --port 43211
+```
+
+Production server on the same port:
+
+```bash
+npm run start
+```
+
+## Checks
+
+```bash
+npm run lint
+npm run typecheck
 ```
 
 ## Demo flow

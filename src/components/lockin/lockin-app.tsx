@@ -57,7 +57,7 @@ export function LockInApp() {
     }, LOCK_MS);
   }, []);
 
-  function handleLock() {
+  const handleLock = useCallback(() => {
     const next = task.trim();
     if (!next) {
       setSetupError("Name the task first. A blank lock is just a screensaver.");
@@ -69,9 +69,9 @@ export function LockInApp() {
     }
     setSetupError(null);
     sealLock(next);
-  }
+  }, [sealLock, task]);
 
-  function handleSuggest() {
+  const handleSuggest = useCallback(() => {
     setSuggesting(true);
     setSetupError(null);
     window.setTimeout(() => {
@@ -80,7 +80,7 @@ export function LockInApp() {
       setTask(pick);
       setSuggesting(false);
     }, 800);
-  }
+  }, []);
 
   const openEscape = useCallback(() => {
     setEscapeAttempts((n) => n + 1);
@@ -198,8 +198,6 @@ export function LockInApp() {
         onBreakLock={openEscape}
       />
     );
-    // handleLock / handleSuggest are stable enough for this demo tree
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     phase,
     task,
@@ -211,6 +209,8 @@ export function LockInApp() {
     blockedAttempts.length,
     escapeAttempts,
     openEscape,
+    handleLock,
+    handleSuggest,
   ]);
 
   return (
