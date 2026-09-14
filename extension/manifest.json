@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "LockIn blocker",
+  "version": "0.2.0",
+  "description": "Blocks YouTube, X, Instagram, Reddit, and other distractors while a LockIn session is sealed.",
+  "permissions": ["declarativeNetRequest", "tabs"],
+  "host_permissions": [
+    "http://127.0.0.1:18791/*",
+    "*://youtube.com/*",
+    "*://*.youtube.com/*",
+    "*://youtu.be/*",
+    "*://*.youtu.be/*",
+    "*://x.com/*",
+    "*://*.x.com/*",
+    "*://twitter.com/*",
+    "*://*.twitter.com/*",
+    "*://instagram.com/*",
+    "*://*.instagram.com/*",
+    "*://reddit.com/*",
+    "*://*.reddit.com/*",
+    "*://tiktok.com/*",
+    "*://*.tiktok.com/*",
+    "*://facebook.com/*",
+    "*://*.facebook.com/*",
+    "*://netflix.com/*",
+    "*://*.netflix.com/*",
+    "*://twitch.tv/*",
+    "*://*.twitch.tv/*",
+    "*://discord.com/*",
+    "*://*.discord.com/*",
+    "*://news.ycombinator.com/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_title": "LockIn blocker"
+  }
+}
