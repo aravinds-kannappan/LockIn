@@ -80,7 +80,7 @@ async function setSystemPac(pacUrl, enabled) {
   return results;
 }
 
-function startControlServer({ port, proxyPort, getState, onBlocked }) {
+function startControlServer({ port, proxyPort, getState, onBlocked, onLock, onAbandon }) {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || "/", `http://127.0.0.1:${port}`);
     if (req.method === "OPTIONS") {
@@ -119,6 +119,23 @@ function startControlServer({ port, proxyPort, getState, onBlocked }) {
       });
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/lock") {
+      const body = await readBody(req);
+      const result = await (onLock ? onLock(body.task) : { ok: false, error: "no lock hook" });
+      json(res, result?.ok ? 200 : 400, result || { ok: false });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/abandon") {
+      if (!onAbandon) {
+        json(res, 400, { ok: false, error: "no abandon hook" });
+        return;
+      }
+      const recap = await onAbandon();
+      json(res, 200, { ok: true, recap });
       return;
     }
 

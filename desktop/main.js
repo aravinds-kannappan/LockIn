@@ -1,62 +1,35 @@
 "use strict";
 
 const path = require("path");
-const { app, BrowserWindow, ipcMain, screen, globalShortcut } = require("electron");
+const { app, BrowserWindow, ipcMain, screen, globalShortcut, Tray, Menu, nativeImage } = require("electron");
 const { createEngine } = require("./engine");
 const { enableLoginItem, disableLoginItem } = require("./login");
 
 const REPO_ROOT = path.join(__dirname, "..");
 
 let mainWindow = null;
-let coverWindows = [];
 let engine = null;
-let quitting = false;
-
-function coverDisplays(primaryId) {
-  for (const win of coverWindows) {
-    if (!win.isDestroyed()) win.close();
-  }
-  coverWindows = [];
-  for (const display of screen.getAllDisplays()) {
-    if (display.id === primaryId) continue;
-    const win = new BrowserWindow({
-      x: display.bounds.x,
-      y: display.bounds.y,
-      width: display.bounds.width,
-      height: display.bounds.height,
-      frame: false,
-      closable: false,
-      minimizable: false,
-      maximizable: false,
-      fullscreenable: false,
-      alwaysOnTop: true,
-      skipTaskbar: true,
-      backgroundColor: "#09090b",
-      show: true,
-    });
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    win.setAlwaysOnTop(true, "floating");
-    win.loadFile(path.join(__dirname, "..", "renderer", "cover.html"));
-    coverWindows.push(win);
-  }
-}
+let tray = null;
 
 function createMainWindow() {
-  const display = screen.getPrimaryDisplay();
-  const { x, y, width, height } = display.bounds;
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  const winW = 400;
+  const winH = 640;
   const win = new BrowserWindow({
-    x,
-    y,
-    width,
-    height,
+    x: Math.round(width - winW - 24),
+    y: Math.round((height - winH) / 2),
+    width: winW,
+    height: winH,
+    minWidth: 360,
+    minHeight: 480,
     frame: false,
-    closable: true,
-    minimizable: false,
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 14, y: 14 },
+    resizable: true,
+    minimizable: true,
     maximizable: false,
-    fullscreenable: false,
-    simpleFullscreen: true,
     alwaysOnTop: true,
-    backgroundColor: "#09090b",
+    backgroundColor: "#0a0a0c",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -64,11 +37,19 @@ function createMainWindow() {
       sandbox: true,
     },
   });
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setAlwaysOnTop(true, "floating");
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
-  coverDisplays(display.id);
   return win;
+}
+
+function showAndFocus() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    mainWindow = createMainWindow();
+  } else {
+    mainWindow.show();
+    mainWindow.focus();
+  }
 }
 
 function broadcast(state) {
@@ -77,18 +58,51 @@ function broadcast(state) {
   }
 }
 
-function applyLockChrome(locked) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.setAlwaysOnTop(true, locked ? "screen-saver" : "floating");
-  mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  mainWindow.setKiosk(false);
-  if (locked) {
-    mainWindow.setClosable(false);
-    mainWindow.show();
-    mainWindow.moveTop();
-    mainWindow.focus();
+function updateTrayMenu() {
+  if (!tray || !engine) return;
+  const state = engine.getPublic();
+  const items = [];
+  if (state.locked) {
+    const taskLabel = state.task.length > 32 ? state.task.slice(0, 32) + "…" : state.task;
+    items.push({ label: `Locked: ${taskLabel}`, enabled: false });
+    items.push({ label: "End Session", click: () => engine.endSession("") });
   } else {
-    mainWindow.setClosable(true);
+    items.push({ label: "Lock In", click: () => { engine.quickLock(); showAndFocus(); } });
+  }
+  items.push({ type: "separator" });
+  items.push({ label: "Show Window", accelerator: "CmdOrCtrl+Shift+L", click: showAndFocus });
+  items.push({ type: "separator" });
+  items.push({ label: "Quit", click: () => app.quit() });
+  tray.setContextMenu(Menu.buildFromTemplate(items));
+  tray.setToolTip(state.locked ? `LockIn — ${state.task}` : "LockIn");
+}
+
+function createTray() {
+  const iconPath = path.join(__dirname, "..", "assets", "trayTemplate.png");
+  const icon = nativeImage.createFromPath(iconPath);
+  icon.setTemplateImage(true);
+  tray = new Tray(icon);
+  tray.on("click", showAndFocus);
+  updateTrayMenu();
+}
+
+function handleProtocolUrl(url) {
+  if (!engine) return;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    showAndFocus();
+    return;
+  }
+  const action = parsed.host || parsed.pathname.replace(/^\//, "");
+  if (action === "start" || action === "lock") {
+    if (!engine.getPublic().locked) engine.quickLock();
+    showAndFocus();
+  } else if (action === "stop" || action === "end") {
+    if (engine.getPublic().locked) engine.endSession("");
+  } else {
+    showAndFocus();
   }
 }
 
@@ -105,60 +119,50 @@ async function syncLoginItem(enabled) {
   else await disableLoginItem();
 }
 
+app.setAsDefaultProtocolClient("lockin");
 app.setName("LockIn");
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
-    if (mainWindow) {
-      mainWindow.show();
-      mainWindow.focus();
-    }
+  app.on("second-instance", (_event, argv) => {
+    showAndFocus();
+    const urlArg = argv.find((a) => a.startsWith("lockin://"));
+    if (urlArg) handleProtocolUrl(urlArg);
+  });
+
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    handleProtocolUrl(url);
   });
 
   app.whenReady().then(async () => {
     engine = createEngine();
     await engine.start();
     mainWindow = createMainWindow();
+    createTray();
 
     engine.on("change", (state) => {
-      applyLockChrome(state.locked);
       broadcast(state);
+      updateTrayMenu();
     });
 
-    if (engine.getPublic().loginItemEnabled) {
+    if (engine.getPublic().loginItemEnabled && process.env.LOCKIN_SKIP_LOGIN !== "1") {
       await syncLoginItem(true);
     }
 
-    globalShortcut.register("Escape", () => {
-      const state = engine.getPublic();
-      if (state.locked) {
-        engine.beginEscape();
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send("lockin:escape");
-          mainWindow.show();
-          mainWindow.focus();
-        }
-      }
-    });
+    globalShortcut.register("CommandOrControl+Shift+L", showAndFocus);
 
     ipcMain.handle("lockin:state", () => engine.getPublic());
     ipcMain.handle("lockin:lock", async (_e, task) => engine.lock(task));
+    ipcMain.handle("lockin:quick-lock", async () => engine.quickLock());
     ipcMain.handle("lockin:suggest", () => engine.suggest());
     ipcMain.handle("lockin:notes", (_e, notes) => {
       engine.setNotes(notes);
       return true;
     });
-    ipcMain.handle("lockin:begin-done", () => {
-      engine.beginDone();
-      return engine.getPublic();
-    });
-    ipcMain.handle("lockin:debrief", (_e, text) => engine.submitDebrief(text));
-    ipcMain.handle("lockin:begin-escape", () => engine.beginEscape());
-    ipcMain.handle("lockin:stay", () => engine.getPublic());
-    ipcMain.handle("lockin:abandon", () => engine.abandon());
+    ipcMain.handle("lockin:end-session", async (_e, note) => engine.endSession(note));
     ipcMain.handle("lockin:reset", () => {
       engine.reset();
       return engine.getPublic();
@@ -168,35 +172,9 @@ if (!gotLock) {
       await syncLoginItem(next);
       return engine.getPublic();
     });
-
-    mainWindow.on("close", (event) => {
-      const state = engine.getPublic();
-      if (state.locked && !quitting) {
-        event.preventDefault();
-        engine.beginEscape();
-        mainWindow.webContents.send("lockin:escape");
-      }
-    });
-
-    screen.on("display-added", () => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        coverDisplays(screen.getPrimaryDisplay().id);
-      }
-    });
   });
 
-  app.on("before-quit", (event) => {
-    const state = engine ? engine.getPublic() : { locked: false };
-    if (state.locked && !quitting) {
-      event.preventDefault();
-      engine.beginEscape();
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.show();
-        mainWindow.webContents.send("lockin:escape");
-      }
-      return;
-    }
-    quitting = true;
+  app.on("before-quit", () => {
     globalShortcut.unregisterAll();
     if (engine) engine.disableBlocks().catch(() => {});
   });
@@ -205,12 +183,5 @@ if (!gotLock) {
     if (process.platform !== "darwin") app.quit();
   });
 
-  app.on("activate", () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.show();
-      mainWindow.focus();
-    } else if (app.isReady()) {
-      mainWindow = createMainWindow();
-    }
-  });
+  app.on("activate", showAndFocus);
 }

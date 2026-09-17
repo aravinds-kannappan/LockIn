@@ -1,8 +1,8 @@
 # LockIn
 
-A focus lock for this Mac. Name one task. The desktop is covered. If you open a **real** Chrome or Safari tab to YouTube, X, Instagram, Reddit, or the rest of the blocklist, that navigation is killed. Done is a written debrief. Warden, the local agent, grades it — and remembers how you work.
+A focus agent that blocks social media in your browser while you work. It pops up as a compact floating window — your computer stays unlocked, but YouTube, X, Instagram, Reddit, TikTok, Facebook, Netflix, Twitch, Discord, and Hacker News tabs get killed in Chrome and Safari.
 
-This is a native macOS app (Electron). It is not an in-app fake browser.
+Warden, the local agent, remembers your sessions — tasks, blocked sites, and how you work. No cloud, no account.
 
 Verified with **Node v22.23.2** and **npm 10.9.8** on macOS.
 
@@ -15,69 +15,54 @@ npm install
 npm start
 ```
 
-`npm start` opens the LockIn overlay immediately (always-on-top, every Space). That is the agent UI. It also starts a local control server on `127.0.0.1:18791` and a blocking proxy on `127.0.0.1:18792`.
+`npm start` opens the LockIn popup (always-on-top, floating). Name a task, hit **Lock In**, and social media tabs die in real Chrome and Safari until you end the session.
 
-## Open Warden at login
+## How blocking works
 
-From the setup screen, leave **Open Warden at login / when this computer starts** checked, or:
+Blocks apply **only while a session is active**. Ending the session turns them off. Three layers, all local:
+
+1. **Chrome / Safari watchdog** — reads real tab URLs via AppleScript and redirects blocked tabs to a local block page. First run, macOS may ask to allow Automation for Google Chrome and Safari.
+2. **Chrome extension** (faster, no flash) — Chrome → `chrome://extensions` → Developer mode → **Load unpacked** → select the `extension/` folder. Uses `declarativeNetRequest` so blocked sites never paint.
+3. **System PAC + proxy** — sets a PAC file via `networksetup` so Chrome and Safari route blocked hosts to a local proxy that returns `403`. If macOS denies PAC without an admin password, layers 1–2 still work.
+
+Allowed sites (GitHub, docs, etc.) are never proxied.
+
+## Summon the agent
+
+Three ways to call LockIn:
+
+1. **Keyboard shortcut** — `Cmd+Shift+L` (global, works from any app) shows the LockIn window.
+2. **Menu bar** — Click the **L** tray icon in the menu bar for quick actions: start a session, end one, or show the window.
+3. **Siri / Shortcuts** — LockIn registers the `lockin://` URL scheme. Create a Shortcut that opens `lockin://start` and name it "Lock In" — then say **"Hey Siri, Lock In"** to start a focus session.
+
+URL scheme commands:
+- `lockin://start` — start a session (uses your last task)
+- `lockin://stop` — end the current session
+- `lockin://open` — show the window
+
+## Open at login
+
+From the setup screen, check **Open at login**, or:
 
 ```bash
 npm run install-login
 ```
 
-That writes `~/Library/LaunchAgents/ai.lockin.agent.plist` and loads it. At login, LockIn pops up — no extra click.
+To remove: uncheck the box, or `launchctl unload ~/Library/LaunchAgents/ai.lockin.agent.plist`.
 
-To remove it: uncheck the box in the UI, or `launchctl unload ~/Library/LaunchAgents/ai.lockin.agent.plist`.
+## Prove blocking works
 
-## Real site blocking (no reboot)
-
-Blocks apply **only while a lock is sealed**. Unlocking turns them off. You do not reboot.
-
-Three layers, all local:
-
-1. **Chrome / Safari watchdog** — while locked, LockIn reads real tab URLs and redirects blocked tabs to `http://127.0.0.1:18791/blocked`. First run, macOS may ask to allow Automation for Google Chrome and Safari. Allow it.
-2. **Chrome extension** (faster, no YouTube flash) — Chrome → `chrome://extensions` → Developer mode → **Load unpacked** → select the `extension/` folder in this repo. The extension polls lock state and uses `declarativeNetRequest` so `youtube.com` never paints.
-3. **System PAC + proxy** — LockIn tries `networksetup -setautoproxyurl` so Chrome and Safari send blocked hosts to `127.0.0.1:18792`, which returns `403` on `CONNECT youtube.com:443`. If macOS denies PAC without an admin password, layers 1–2 still stop the tab. PAC is cleared when the lock ends.
-
-Allowed work (GitHub, docs, etc.) is not proxied.
-
-## Prove a real YouTube tab is blocked
-
-With LockIn running and a session sealed (`npm start`, then **Lock this machine**):
+With LockIn running and a session active:
 
 ```bash
-# HTTPS CONNECT through the lock proxy — this is what a browser hits for youtube.com
 npm run prove
 ```
 
-That script seals a lock itself and asserts `CONNECT youtube.com:443` returns `403 LockIn blocked YouTube`.
+Or load the Chrome extension and navigate to `https://www.youtube.com` — the tab gets killed.
 
-Manual Chrome proof:
+## Learning
 
-```bash
-npm start          # then lock a task in the overlay
-npm run prove:chrome
-```
-
-`prove:chrome` opens a real Chrome profile with the LockIn extension loaded and navigates to `https://www.youtube.com`. You should land on the LockIn block page (extension or watchdog) or a failed tunnel (PAC). The overlay's **Live blocks** list should show YouTube.
-
-Or by hand: new Chrome/Safari tab → `https://www.youtube.com` while locked.
-
-## Learning (local, no cloud)
-
-Memory lives at:
-
-```text
-~/Library/Application Support/LockIn/memory.json
-```
-
-Warden stores tasks, debriefs, blocked hosts, and escape attempts. The next setup screen greets you with that. Abandoned tasks get suggested again. After a sloppy lock (escapes / lots of blocks), debriefs get a stricter read.
-
-## Session rules
-
-- **Done** requires a written debrief. Generic “I did the work” is rejected.
-- **Break lock** / Esc / Cmd+Q while locked is a gauntlet: type `I QUIT`, wait, confirm. Abandoned sessions are stored as broken.
-- Quitting the app while locked does not skip the gauntlet.
+Memory lives at `~/Library/Application Support/LockIn/memory.json`. Warden stores tasks, blocked hosts, and session history. Frequently blocked hosts get added to the blocklist automatically.
 
 ## Checks
 
@@ -88,4 +73,4 @@ npm run prove
 
 ## Stack
 
-Electron (macOS overlay + login item) + a localhost PAC/proxy + a Chrome MV3 extension + AppleScript tab watchdog. Session memory is a JSON file on disk. No auth, no cloud database.
+Electron (macOS floating popup + login item) + localhost PAC/proxy + Chrome MV3 extension + AppleScript tab watchdog. Session memory is a JSON file on disk. No auth, no cloud.

@@ -9,10 +9,8 @@ const {
   recordSession,
   recordBlock,
   learnedHosts,
-  shouldBeStrict,
 } = require("../shared/learning");
 const { SAMPLE_TASKS } = require("../shared/sites");
-const { reviewExplanation } = require("../shared/review");
 const {
   DEFAULT_API_PORT,
   DEFAULT_PROXY_PORT,
@@ -40,10 +38,6 @@ function createEngine(options = {}) {
     startedAt: null,
     blockedEvents: [],
     escapeAttempts: 0,
-    explanation: "",
-    reviewError: null,
-    reviewing: false,
-    recap: null,
     extraHosts: learnedHosts(memory),
     apiPort,
     proxyPort,
@@ -81,10 +75,6 @@ function createEngine(options = {}) {
       blockedEvents: state.blockedEvents.slice(-40),
       blockedAttempts: state.blockedEvents.length,
       escapeAttempts: state.escapeAttempts,
-      explanation: state.explanation,
-      reviewError: state.reviewError,
-      reviewing: state.reviewing,
-      recap: state.recap,
       extraHosts: state.extraHosts,
       greeting,
       suggestedTask: greeting.suggestedTask,
@@ -94,13 +84,12 @@ function createEngine(options = {}) {
       apiPort,
       proxyPort,
       memoryPath,
+      recap: state.recap || null,
       stats: {
         sessions: memory.sessions.length,
         completed: memory.completedCount,
         abandoned: memory.abandonedCount,
         totalBlocks: memory.totalBlocks,
-        totalEscapes: memory.totalEscapes,
-        hostHits: memory.hostHits,
       },
     };
   }
@@ -108,9 +97,7 @@ function createEngine(options = {}) {
   function handleBlocked(match, url, source = "network") {
     if (!state.locked || !match) return;
     const last = state.blockedEvents[state.blockedEvents.length - 1];
-    if (last && last.host === match.host && Date.now() - last.at < 1200) {
-      return;
-    }
+    if (last && last.host === match.host && Date.now() - last.at < 1200) return;
     state.blockedEvents.push({
       host: match.host,
       name: match.name,
@@ -136,9 +123,8 @@ function createEngine(options = {}) {
       const results = await setSystemPac(pacUrl, true);
       state.pacResults = results;
       state.pacEnabled = results.some((r) => r.setOn?.ok || r.setUrl?.ok);
-    } catch (error) {
+    } catch {
       state.pacEnabled = false;
-      state.pacResults = [{ error: String(error) }];
     }
     watchdog.start();
   }
@@ -166,6 +152,8 @@ function createEngine(options = {}) {
       proxyPort,
       getState: () => state,
       onBlocked: (match, url) => handleBlocked(match, url, "extension"),
+      onLock: (task) => lock(task),
+      onAbandon: () => endSession(""),
     });
     await startProxy(proxyPort, () => state, (match, url) =>
       handleBlocked(match, url, "proxy"),
@@ -174,8 +162,8 @@ function createEngine(options = {}) {
 
   function validateTask(task) {
     const next = String(task || "").trim();
-    if (!next) return "Name the task first. A blank lock is just a screensaver.";
-    if (next.length < 8) return "Too vague. Write a task someone else could grade.";
+    if (!next) return "Name the task first.";
+    if (next.length < 8) return "Too vague — write a real task.";
     return null;
   }
 
@@ -186,13 +174,10 @@ function createEngine(options = {}) {
     state.notes = "";
     state.blockedEvents = [];
     state.escapeAttempts = 0;
-    state.explanation = "";
-    state.reviewError = null;
-    state.reviewing = false;
-    state.recap = null;
     state.extraHosts = learnedHosts(memory);
     state.phase = "locking";
     state.locked = false;
+    state.recap = null;
     emit("change");
     setTimeout(async () => {
       state.startedAt = Date.now();
@@ -200,7 +185,7 @@ function createEngine(options = {}) {
       state.phase = "locked";
       await enableBlocks();
       emit("change");
-    }, 1600);
+    }, 1200);
     return { ok: true };
   }
 
@@ -208,17 +193,18 @@ function createEngine(options = {}) {
     return suggestTask(memory);
   }
 
-  async function finish(abandoned, verdict, text) {
+  async function endSession(note) {
     const durationMs = state.startedAt ? Date.now() - state.startedAt : 0;
     const blockedHosts = [...new Set(state.blockedEvents.map((e) => e.host))];
+    const trimmedNote = String(note || "").trim();
     const recap = {
       task: state.task,
-      abandoned,
+      abandoned: !trimmedNote,
       durationMs,
       blockedAttempts: state.blockedEvents.length,
-      escapeAttempts: state.escapeAttempts,
-      explanation: text || "",
-      verdict,
+      escapeAttempts: 0,
+      explanation: trimmedNote,
+      verdict: trimmedNote ? "Session complete." : "Ended without a note.",
       blockedHosts,
     };
     recordSession(memory, recap);
@@ -229,51 +215,13 @@ function createEngine(options = {}) {
     state.startedAt = null;
     await disableBlocks();
     emit("change");
-    return recap;
-  }
-
-  function beginEscape() {
-    if (!state.locked) return getPublic();
-    state.escapeAttempts += 1;
-    emit("change");
-    return getPublic();
-  }
-
-  async function abandon() {
-    return finish(true, "Broken lock.", "");
-  }
-
-  function beginDone() {
-    state.reviewError = null;
-    emit("change");
-  }
-
-  async function submitDebrief(text) {
-    state.reviewing = true;
-    state.explanation = text;
-    emit("change");
-    const result = reviewExplanation(state.task, text, {
-      strict: shouldBeStrict(memory),
-    });
-    await new Promise((r) => setTimeout(r, 700));
-    if (!result.accepted) {
-      state.reviewing = false;
-      state.reviewError = result.message;
-      emit("change");
-      return { ok: false, error: result.message };
-    }
-    state.reviewing = false;
-    state.reviewError = null;
-    await finish(false, result.message, String(text).trim());
-    return { ok: true };
+    return { ok: true, recap };
   }
 
   function reset() {
     state.phase = "setup";
     state.task = "";
     state.notes = "";
-    state.explanation = "";
-    state.reviewError = null;
     state.recap = null;
     state.blockedEvents = [];
     state.escapeAttempts = 0;
@@ -291,14 +239,18 @@ function createEngine(options = {}) {
     return state.loginItemEnabled;
   }
 
+  async function quickLock() {
+    if (state.locked) return { ok: true, alreadyLocked: true };
+    const task = suggestTask(memory);
+    return lock(task);
+  }
+
   return {
     start,
     lock,
+    quickLock,
     suggest,
-    beginEscape,
-    abandon,
-    beginDone,
-    submitDebrief,
+    endSession,
     reset,
     setNotes,
     setLoginItemEnabled,

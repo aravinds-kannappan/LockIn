@@ -1,8 +1,7 @@
 const LOCKING_STEPS = [
-  "Covering the desktop",
-  "Arming Chrome and Safari tab kills",
-  "Binding blocked hosts to this lock",
-  "Handing the machine to one task",
+  "Arming site blockers",
+  "Watching Chrome & Safari",
+  "You're locked in",
 ];
 
 const state = {
@@ -15,9 +14,6 @@ const state = {
   blockedEvents: [],
   elapsedMs: 0,
   blockedAttempts: 0,
-  escapeAttempts: 0,
-  reviewError: null,
-  reviewing: false,
   recap: null,
   pacEnabled: false,
   stats: {},
@@ -26,30 +22,11 @@ const state = {
 let setupTask = "";
 let setupError = null;
 let suggesting = false;
-let doneOpen = false;
-let escapeOpen = false;
-let explanation = "";
-let escapeStep = 1;
-let escapePhrase = "";
-let escapePhraseError = null;
-let holdLeft = 5;
-let holdTimer = null;
+let endingOpen = false;
+let endNote = "";
 let lockStep = 0;
 let lockStepTimer = null;
 let clockTimer = null;
-
-function $(html) {
-  return html;
-}
-
-function formatDuration(ms) {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -59,189 +36,185 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+function formatDuration(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0)
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function timeAgo(timestamp) {
+  const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ago`;
+}
+
 function render() {
   const root = document.getElementById("app");
   if (state.phase === "locking") root.innerHTML = lockingView();
-  else if (state.phase === "locked") root.innerHTML = sessionView();
+  else if (state.phase === "locked") root.innerHTML = lockedView();
   else if (state.phase === "recap") root.innerHTML = recapView();
   else root.innerHTML = setupView();
-  if (doneOpen) root.insertAdjacentHTML("beforeend", doneModal());
-  if (escapeOpen) root.insertAdjacentHTML("beforeend", escapeModal());
+  if (endingOpen) root.insertAdjacentHTML("beforeend", endModal());
   bind();
 }
 
 function setupView() {
   const g = state.greeting || {};
-  return $`
-    <div class="app">
-      <header class="header">
-        <div class="brand"><span class="mark">L</span> LockIn</div>
-        <p class="muted">Real machine lock. Not a browser toy.</p>
-      </header>
-      <div class="center">
-        <div class="stack">
-          <p class="kicker">Warden</p>
-          <h1>${escapeHtml(g.headline || "Name the one thing.")}</h1>
-          <p>${escapeHtml(g.body || "This machine will only do this task.")}</p>
-          <form id="lock-form">
-            <label for="task">Focus task</label>
-            <textarea id="task" rows="4" placeholder="Draft the Q3 hiring brief for the senior backend role">${escapeHtml(setupTask)}</textarea>
-            <p class="empty">${setupTask.trim() ? "One sentence. Specific enough that a stranger could grade you." : "Empty lock. Pick a sample or let the agent choose."}</p>
-            ${setupError ? `<div class="alert"><h3>Can't seal this</h3><p>${escapeHtml(setupError)}</p></div>` : ""}
-            <div class="row" style="margin-top:14px">
-              <button class="btn primary grow" type="submit">Lock this machine</button>
-              <button class="btn grow" type="button" id="suggest">${suggesting ? "Warden is choosing…" : "Let the agent pick"}</button>
-            </div>
-          </form>
-          <label class="check">
-            <input type="checkbox" id="login-item" ${state.loginItemEnabled ? "checked" : ""} />
-            Open Warden at login / when this computer starts
-          </label>
-          <p class="kicker" style="margin-top:28px">Sample locks</p>
-          <ul class="samples">
-            ${(state.sampleTasks || []).map((t) => `<li><button type="button" data-sample="${escapeHtml(t)}">${escapeHtml(t)}</button></li>`).join("")}
-          </ul>
+  const hasHistory = (state.stats?.sessions || 0) > 0;
+  return `
+    <div class="agent">
+      <div class="drag-region"></div>
+      <div class="agent-header">
+        <div class="agent-icon">L</div>
+        <div>
+          <div class="agent-name">LockIn</div>
+          <div class="agent-sub">Focus agent</div>
         </div>
+      </div>
+      <div class="agent-body">
+        <div class="greeting">
+          <p class="greeting-headline">${escapeHtml(g.headline || "Ready to lock in.")}</p>
+          ${g.body ? `<p class="greeting-body">${escapeHtml(g.body)}</p>` : ""}
+        </div>
+        <form id="lock-form">
+          <label for="task">What are you working on?</label>
+          <textarea id="task" rows="3" placeholder="e.g. Finish the API docs for the auth endpoint">${escapeHtml(setupTask)}</textarea>
+          ${setupError ? `<div class="error-msg">${escapeHtml(setupError)}</div>` : ""}
+          <div class="btn-row">
+            <button class="btn primary" type="submit">Lock In</button>
+            <button class="btn ghost" type="button" id="suggest">${suggesting ? "…" : "Suggest"}</button>
+          </div>
+        </form>
+        ${
+          state.sampleTasks?.length
+            ? `
+          <div class="samples">
+            <p class="section-label">Try one of these</p>
+            ${state.sampleTasks
+              .map(
+                (t) =>
+                  `<button class="sample-btn" type="button" data-sample="${escapeHtml(t)}">${escapeHtml(t)}</button>`,
+              )
+              .join("")}
+          </div>
+        `
+            : ""
+        }
+        ${
+          hasHistory
+            ? `
+          <div class="stats-row">
+            <div class="stat"><span class="stat-num">${state.stats.sessions}</span> sessions</div>
+            <div class="stat"><span class="stat-num">${state.stats.completed}</span> completed</div>
+            <div class="stat"><span class="stat-num">${state.stats.totalBlocks}</span> blocks</div>
+          </div>
+        `
+            : ""
+        }
+        <label class="toggle-row">
+          <input type="checkbox" id="login-item" ${state.loginItemEnabled ? "checked" : ""} />
+          <span>Open at login</span>
+        </label>
+        <p class="shortcut-hint">⌘⇧L to summon · <code>lockin://start</code> for Siri Shortcuts</p>
       </div>
     </div>`;
 }
 
 function lockingView() {
-  return $`
-    <div class="app">
-      <div class="center">
-        <div class="stack" style="text-align:center">
-          <p class="kicker">Sealing session</p>
-          <div class="progress"><span></span></div>
-          <p class="mono">${escapeHtml(LOCKING_STEPS[lockStep] || LOCKING_STEPS.at(-1))}</p>
-          <p>Locked task: <span style="color:#e4e4e7">${escapeHtml(state.task)}</span></p>
+  return `
+    <div class="agent">
+      <div class="drag-region"></div>
+      <div class="agent-body" style="display:flex;align-items:center;justify-content:center;min-height:300px">
+        <div style="text-align:center">
+          <div class="pulse-ring"></div>
+          <p class="locking-text">${escapeHtml(LOCKING_STEPS[lockStep] || LOCKING_STEPS.at(-1))}</p>
+          <p class="locking-task">${escapeHtml(state.task)}</p>
         </div>
       </div>
     </div>`;
 }
 
-function sessionView() {
+function lockedView() {
   const events = (state.blockedEvents || []).slice().reverse();
-  return $`
-    <div class="app">
-      <header class="header">
-        <div class="live"><span class="dot"></span> Computer locked <span class="badge">${formatDuration(state.elapsedMs)}</span></div>
-        <div class="row">
-          <span class="muted mono">Esc = friction · ${state.blockedAttempts} blocked · ${state.escapeAttempts} escapes</span>
-          <button class="btn sm" id="break">Break lock</button>
-          <button class="btn primary sm" id="done">Done</button>
-        </div>
-      </header>
-      <div class="taskbar">
-        <p class="task"><span class="kicker" style="display:inline;margin:0 8px 0 0">Task</span>${escapeHtml(state.task)}</p>
-        <p class="muted">${state.pacEnabled ? "System PAC armed" : "Tab watchdog + extension armed"} · blocks apply only while locked</p>
+  return `
+    <div class="agent">
+      <div class="drag-region"></div>
+      <div class="locked-header">
+        <div class="locked-dot"></div>
+        <span class="locked-label">Locked in</span>
+        <span class="locked-timer">${formatDuration(state.elapsedMs)}</span>
       </div>
-      <div class="desk">
-        <section class="panel">
-          <label for="notes">Session desk</label>
-          <textarea id="notes" placeholder="This is the writable surface. The rest of the machine is locked. Open a real Chrome tab to YouTube and it dies.">${escapeHtml(state.notes || "")}</textarea>
-          <p class="empty">${(state.notes || "").trim() ? "Notes stay on this machine for the session. They don't count as a debrief." : "Desk is empty. That's fine for a minute — not for the whole lock."}</p>
-        </section>
-        <section class="panel">
-          <label>Live blocks (real Chrome / Safari tabs)</label>
-          <div class="feed">
+      <div class="locked-task">${escapeHtml(state.task)}</div>
+      <div class="agent-body">
+        <div class="blocked-section">
+          <p class="section-label">Blocked attempts <span class="count-badge">${state.blockedAttempts || 0}</span></p>
+          <div class="blocked-feed">
             ${
               events.length
                 ? events
                     .map(
-                      (e) => `<div class="hit"><strong>${escapeHtml(e.name || e.host)}</strong><span class="empty">${escapeHtml(e.source || "block")} · ${escapeHtml(e.host)}</span></div>`,
+                      (e) => `
+                <div class="blocked-item">
+                  <span class="blocked-name">${escapeHtml(e.name || e.host)}</span>
+                  <span class="blocked-meta">${escapeHtml(e.source)} · ${timeAgo(e.at)}</span>
+                </div>`,
                     )
                     .join("")
-                : `<p class="empty">No blocked tabs yet. Open a new Chrome or Safari tab to youtube.com — LockIn will kill the navigation system-wide.</p>`
+                : `<p class="empty-feed">No blocked sites yet. Social media tabs will be killed while you're locked in.</p>`
             }
           </div>
-        </section>
+        </div>
+        <button class="btn end-btn" id="end-session">End Session</button>
       </div>
     </div>`;
 }
 
 function recapView() {
   const recap = state.recap || {};
-  return $`
-    <div class="app">
-      <header class="header">
-        <div class="brand"><span class="mark">L</span> LockIn</div>
-        <span class="badge">${recap.abandoned ? "Broken lock" : "Session sealed"}</span>
-      </header>
-      <div class="center">
-        <div class="stack">
-          <h1>${recap.abandoned ? "You broke the lock." : "Debrief accepted."}</h1>
-          <p>${escapeHtml(recap.abandoned ? "That's data, not a sermon. The machine is yours again — and the task is unfinished. Next lock, I'll remember this." : recap.verdict || "")}</p>
-          <div class="card">
-            <header>
-              <div class="kicker">Locked task</div>
-              <p style="color:#e4e4e7;margin:6px 0 0">${escapeHtml(recap.task || "")}</p>
-            </header>
-            <div class="stats">
-              <div><strong>${formatDuration(recap.durationMs || 0)}</strong><p>Time locked</p></div>
-              <div><strong>${recap.blockedAttempts || 0}</strong><p>Blocked sites</p></div>
-              <div><strong>${recap.escapeAttempts || 0}</strong><p>Escape tries</p></div>
-            </div>
-            <footer>
-              ${
-                recap.abandoned
-                  ? `<p class="empty">No debrief on file. You left before Warden could grade the work.</p>`
-                  : `<p class="empty" style="text-transform:uppercase;letter-spacing:.14em;font-size:11px">Your explanation</p><p style="color:#e4e4e7">${escapeHtml(recap.explanation || "")}</p>`
-              }
-            </footer>
+  return `
+    <div class="agent">
+      <div class="drag-region"></div>
+      <div class="agent-header">
+        <div class="agent-icon ${recap.abandoned ? "icon-warn" : "icon-done"}">
+          ${recap.abandoned ? "—" : "✓"}
+        </div>
+        <div>
+          <div class="agent-name">${recap.abandoned ? "Session ended" : "Nice work"}</div>
+          <div class="agent-sub">${escapeHtml(recap.task || "")}</div>
+        </div>
+      </div>
+      <div class="agent-body">
+        <div class="recap-stats">
+          <div class="recap-stat">
+            <div class="recap-num">${formatDuration(recap.durationMs || 0)}</div>
+            <div class="recap-label">Time</div>
           </div>
-          <button class="btn primary grow" style="margin-top:22px;width:100%" id="new-lock">New lock</button>
+          <div class="recap-stat">
+            <div class="recap-num">${recap.blockedAttempts || 0}</div>
+            <div class="recap-label">Blocked</div>
+          </div>
         </div>
+        ${recap.explanation ? `<div class="recap-note"><p class="section-label">Your note</p><p>${escapeHtml(recap.explanation)}</p></div>` : ""}
+        <button class="btn primary" id="new-session" style="width:100%">New Session</button>
       </div>
     </div>`;
 }
 
-function doneModal() {
-  return $`
-    <div class="modal-back" id="done-back">
+function endModal() {
+  return `
+    <div class="modal-overlay" id="modal-overlay">
       <div class="modal">
-        <h2 style="margin:0 0 8px">Debrief required</h2>
-        <p>You don't get to click Done and walk. Write what you did on <span style="color:#e4e4e7">${escapeHtml(state.task)}</span>. Warden will reject a fake.</p>
-        <label for="debrief">What did you do?</label>
-        <textarea id="debrief" rows="6" ${state.reviewing ? "disabled" : ""}>${escapeHtml(explanation)}</textarea>
-        <p class="empty">${explanation.trim() ? "Mention the actual task. “I did the work” is an automatic no." : "Empty debrief. The agent will not accept a blank."}</p>
-        ${state.reviewError ? `<div class="alert"><h3>Warden rejected this</h3><p>${escapeHtml(state.reviewError)}</p></div>` : ""}
-        ${state.reviewing ? `<p class="kicker">Reviewing your debrief against the locked task…</p>` : ""}
-        <div class="actions">
-          <button class="btn" id="keep-working" ${state.reviewing ? "disabled" : ""}>Keep working</button>
-          <button class="btn primary" id="submit-debrief" ${state.reviewing ? "disabled" : ""}>${state.reviewing ? "Judging…" : "Submit debrief"}</button>
-        </div>
-      </div>
-    </div>`;
-}
-
-function escapeModal() {
-  return $`
-    <div class="modal-back">
-      <div class="modal danger">
-        <h2 style="margin:0 0 8px;color:#fecaca">Break the lock?</h2>
-        <p>Escape is logged. This is attempt ${state.escapeAttempts || 1}. Quitting voids the session — there is no debrief, no credit.</p>
-        ${
-          escapeStep === 1
-            ? `<label for="quit-phrase">Type I QUIT to keep going</label>
-               <input id="quit-phrase" class="mono" autocomplete="off" value="${escapeHtml(escapePhrase)}" />
-               <p class="${escapePhraseError ? "" : "empty"}" style="${escapePhraseError ? "color:#f87171" : ""}">${escapeHtml(escapePhraseError || "One-click quit is how you end up on YouTube.")}</p>`
-            : ""
-        }
-        ${
-          escapeStep === 2
-            ? `<div class="hold"><div class="count">${holdLeft}</div><p>Sit with it. The task is still waiting.</p></div>`
-            : ""
-        }
-        ${
-          escapeStep === 3
-            ? `<p>Last chance. Abandoning wipes the lock and marks this session as broken. Stay if you still owe the task a real ending.</p>`
-            : ""
-        }
-        <div class="actions">
-          <button class="btn" id="stay">Stay locked</button>
-          ${escapeStep === 1 ? `<button class="btn danger" id="escape-continue">Continue</button>` : ""}
-          ${escapeStep === 3 ? `<button class="btn danger" id="abandon">Abandon session</button>` : ""}
+        <p class="modal-title">End session?</p>
+        <label for="end-note">Quick note (optional)</label>
+        <textarea id="end-note" rows="3" placeholder="What did you get done?">${escapeHtml(endNote)}</textarea>
+        <div class="btn-row">
+          <button class="btn ghost" id="keep-going">Keep going</button>
+          <button class="btn primary" id="confirm-end">End</button>
         </div>
       </div>
     </div>`;
@@ -259,14 +232,16 @@ function bind() {
       }
     });
   }
+
   document.getElementById("lock-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const result = await window.lockin.lock(setupTask);
     if (!result?.ok) {
-      setupError = result?.error || "Could not lock.";
+      setupError = result?.error || "Could not start.";
       render();
     }
   });
+
   document.getElementById("suggest")?.addEventListener("click", async () => {
     suggesting = true;
     render();
@@ -275,6 +250,7 @@ function bind() {
     suggesting = false;
     render();
   });
+
   document.querySelectorAll("[data-sample]").forEach((btn) => {
     btn.addEventListener("click", () => {
       setupTask = btn.getAttribute("data-sample") || "";
@@ -282,90 +258,58 @@ function bind() {
       render();
     });
   });
+
   document.getElementById("login-item")?.addEventListener("change", async (e) => {
     await window.lockin.setLoginItem(e.target.checked);
   });
-  document.getElementById("notes")?.addEventListener("input", (e) => {
-    state.notes = e.target.value;
-    window.lockin.setNotes(e.target.value);
-  });
-  document.getElementById("done")?.addEventListener("click", () => {
-    doneOpen = true;
-    state.reviewError = null;
-    window.lockin.beginDone();
+
+  document.getElementById("end-session")?.addEventListener("click", () => {
+    endingOpen = true;
+    endNote = "";
     render();
   });
-  document.getElementById("break")?.addEventListener("click", openEscape);
-  document.getElementById("keep-working")?.addEventListener("click", () => {
-    if (state.reviewing) return;
-    doneOpen = false;
+
+  document.getElementById("keep-going")?.addEventListener("click", () => {
+    endingOpen = false;
     render();
   });
-  document.getElementById("submit-debrief")?.addEventListener("click", async () => {
-    explanation = document.getElementById("debrief")?.value || explanation;
-    const result = await window.lockin.submitDebrief(explanation);
-    if (result?.ok) {
-      doneOpen = false;
+
+  document.getElementById("confirm-end")?.addEventListener("click", async () => {
+    endNote = document.getElementById("end-note")?.value || endNote;
+    endingOpen = false;
+    await window.lockin.endSession(endNote);
+  });
+
+  document.getElementById("end-note")?.addEventListener("input", (e) => {
+    endNote = e.target.value;
+  });
+
+  document.getElementById("modal-overlay")?.addEventListener("click", (e) => {
+    if (e.target.id === "modal-overlay") {
+      endingOpen = false;
+      render();
     }
   });
-  document.getElementById("debrief")?.addEventListener("input", (e) => {
-    explanation = e.target.value;
-  });
-  document.getElementById("stay")?.addEventListener("click", closeEscape);
-  document.getElementById("escape-continue")?.addEventListener("click", () => {
-    if (escapePhrase.trim().toUpperCase() !== "I QUIT") {
-      escapePhraseError = "Type I QUIT exactly. No shortcuts.";
-      render();
-      return;
-    }
-    escapeStep = 2;
-    holdLeft = 5;
-    render();
-    holdTimer = setInterval(() => {
-      holdLeft -= 1;
-      if (holdLeft <= 0) {
-        clearInterval(holdTimer);
-        escapeStep = 3;
-      }
-      render();
-    }, 1000);
-  });
-  document.getElementById("quit-phrase")?.addEventListener("input", (e) => {
-    escapePhrase = e.target.value;
-  });
-  document.getElementById("abandon")?.addEventListener("click", async () => {
-    closeEscape();
-    await window.lockin.abandon();
-  });
-  document.getElementById("new-lock")?.addEventListener("click", async () => {
+
+  document.getElementById("new-session")?.addEventListener("click", async () => {
     setupTask = "";
-    explanation = "";
+    endNote = "";
     await window.lockin.reset();
   });
 }
 
-function openEscape() {
-  escapeOpen = true;
-  escapeStep = 1;
-  escapePhrase = "";
-  escapePhraseError = null;
-  window.lockin.beginEscape();
-  render();
-}
-
-function closeEscape() {
-  escapeOpen = false;
-  escapeStep = 1;
-  if (holdTimer) clearInterval(holdTimer);
-  window.lockin.stay();
-  render();
-}
-
 function applyState(next) {
   Object.assign(state, next);
-  if (state.phase === "setup" && !setupTask && state.stats?.sessions > 0 && state.suggestedTask) {
+
+  if (
+    state.phase === "setup" &&
+    !setupTask &&
+    state.stats?.sessions > 0 &&
+    state.suggestedTask
+  ) {
     setupTask = state.suggestedTask;
   }
+
   if (state.phase === "locking" && !lockStepTimer) {
     lockStep = 0;
     lockStepTimer = setInterval(() => {
@@ -377,19 +321,14 @@ function applyState(next) {
     clearInterval(lockStepTimer);
     lockStepTimer = null;
   }
-  if (state.phase === "recap") {
-    doneOpen = false;
-    escapeOpen = false;
-  }
+
   if (state.phase === "locked" && !clockTimer) {
     clockTimer = setInterval(() => {
       if (state.startedAt) {
         state.elapsedMs = Date.now() - state.startedAt;
-        if (!doneOpen && !escapeOpen) render();
-        else {
-          const badge = document.querySelector(".badge");
-          if (badge) badge.textContent = formatDuration(state.elapsedMs);
-        }
+        const timer = document.querySelector(".locked-timer");
+        if (timer) timer.textContent = formatDuration(state.elapsedMs);
+        else render();
       }
     }, 250);
   }
@@ -397,18 +336,11 @@ function applyState(next) {
     clearInterval(clockTimer);
     clockTimer = null;
   }
+
+  if (state.phase === "recap") endingOpen = false;
+
   render();
 }
 
 window.lockin.onState(applyState);
 window.lockin.getState().then(applyState);
-window.lockin.onEscape(() => {
-  if (state.phase === "locked") openEscape();
-});
-
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && state.phase === "locked" && !escapeOpen) {
-    e.preventDefault();
-    openEscape();
-  }
-});

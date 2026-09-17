@@ -3,7 +3,7 @@
   "productName": "LockIn",
   "version": "0.2.0",
   "private": true,
-  "description": "Lock the whole Mac to one task. Real Chrome/Safari blocking. Local learning.",
+  "description": "Focus agent that blocks social media in Chrome/Safari while you work. Local learning.",
   "main": "desktop/main.js",
   "scripts": {
     "start": "electron .",

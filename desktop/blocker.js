@@ -51,9 +51,9 @@ function blockPage({ site, task, host }) {
 <body>
   <main>
     <p class="kicker">LockIn · blocked</p>
-    <h1>${escapeHtml(label)} is closed while this machine is locked.</h1>
-    <p>This is a real navigation kill — not an in-app toy. The tab hit a blocked host and LockIn stopped it.</p>
-    <p class="task">Locked task: ${escapeHtml(lockedTask)}</p>
+    <h1>Nope — ${escapeHtml(label)} is off limits right now.</h1>
+    <p>You're locked in. This site is blocked until your session ends. Get back to it.</p>
+    <p class="task">Current task: ${escapeHtml(lockedTask)}</p>
   </main>
 </body>
 </html>`;
