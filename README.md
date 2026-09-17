@@ -1,51 +1,76 @@
 # LockIn
 
-A focus lock that actually forces you to stay on one task — not a polite site blocker.
+A focus agent that blocks social media in your browser while you work. It pops up as a compact floating window — your computer stays unlocked, but YouTube, X, Instagram, Reddit, TikTok, Facebook, Netflix, Twitch, Discord, and Hacker News tabs get killed in Chrome and Safari.
 
-Name one task. The machine goes into a full-screen lock: the desk is notes + a timer, the fake browser refuses YouTube, X, Instagram, Reddit, and the rest, and quitting takes friction (type `I QUIT`, wait, confirm). Done is not a click. You write what you did. Warden, the in-app agent, accepts a real debrief or sends you back.
+Warden, the local agent, remembers your sessions — tasks, blocked sites, and how you work. No cloud, no account.
 
-This repo is a clickable Next.js demo. No auth, no database, no Chrome extension.
+Verified with **Node v22.23.2** and **npm 10.9.8** on macOS.
 
-Verified on this machine with **Node v22.23.2** and **npm 10.9.8**.
-
-## Clone, install, run
+## Clone, install, start
 
 ```bash
 git clone git@github.com:aravinds-kannappan/LockIn.git
 cd LockIn
 npm install
-npm run dev
+npm start
 ```
 
-Then open [http://127.0.0.1:43211](http://127.0.0.1:43211). The dev server binds to `0.0.0.0:43211`.
+`npm start` opens the LockIn popup (always-on-top, floating). Name a task, hit **Lock In**, and social media tabs die in real Chrome and Safari until you end the session.
 
-## Build
+## How blocking works
+
+Blocks apply **only while a session is active**. Ending the session turns them off. Three layers, all local:
+
+1. **Chrome / Safari watchdog** — reads real tab URLs via AppleScript and redirects blocked tabs to a local block page. First run, macOS may ask to allow Automation for Google Chrome and Safari.
+2. **Chrome extension** (faster, no flash) — Chrome → `chrome://extensions` → Developer mode → **Load unpacked** → select the `extension/` folder. Uses `declarativeNetRequest` so blocked sites never paint.
+3. **System PAC + proxy** — sets a PAC file via `networksetup` so Chrome and Safari route blocked hosts to a local proxy that returns `403`. If macOS denies PAC without an admin password, layers 1–2 still work.
+
+Allowed sites (GitHub, docs, etc.) are never proxied.
+
+## Summon the agent
+
+Three ways to call LockIn:
+
+1. **Keyboard shortcut** — `Cmd+Shift+L` (global, works from any app) shows the LockIn window.
+2. **Menu bar** — Click the **L** tray icon in the menu bar for quick actions: start a session, end one, or show the window.
+3. **Siri / Shortcuts** — LockIn registers the `lockin://` URL scheme. Create a Shortcut that opens `lockin://start` and name it "Lock In" — then say **"Hey Siri, Lock In"** to start a focus session.
+
+URL scheme commands:
+- `lockin://start` — start a session (uses your last task)
+- `lockin://stop` — end the current session
+- `lockin://open` — show the window
+
+## Open at login
+
+From the setup screen, check **Open at login**, or:
 
 ```bash
-npm run build
+npm run install-login
 ```
 
-Production server on the same port:
+To remove: uncheck the box, or `launchctl unload ~/Library/LaunchAgents/ai.lockin.agent.plist`.
+
+## Prove blocking works
+
+With LockIn running and a session active:
 
 ```bash
-npm run start
+npm run prove
 ```
+
+Or load the Chrome extension and navigate to `https://www.youtube.com` — the tab gets killed.
+
+## Learning
+
+Memory lives at `~/Library/Application Support/LockIn/memory.json`. Warden stores tasks, blocked hosts, and session history. Frequently blocked hosts get added to the blocklist automatically.
 
 ## Checks
 
 ```bash
-npm run lint
-npm run typecheck
+npm test
+npm run prove
 ```
-
-## Demo flow
-
-1. Pick a sample lock (or let the agent pick), then **Lock this machine**.
-2. While locked, open YouTube / X / Instagram / Reddit in the in-app browser — they are refused and counted.
-3. **Break lock** is a gauntlet, not an exit. **Esc** opens the same gauntlet.
-4. **Done** requires a written debrief. A one-liner that does not mention the task is rejected.
-5. Recap shows time locked, blocked-site attempts, and escape tries.
 
 ## Stack
 
-Next.js (App Router) + TypeScript + Tailwind CSS + shadcn/ui. Session state lives in the client for this slice.
+Electron (macOS floating popup + login item) + localhost PAC/proxy + Chrome MV3 extension + AppleScript tab watchdog. Session memory is a JSON file on disk. No auth, no cloud.
