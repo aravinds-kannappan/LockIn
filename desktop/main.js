@@ -158,6 +158,9 @@ if (!gotLock) {
     ipcMain.handle("lockin:lock", async (_e, task) => engine.lock(task));
     ipcMain.handle("lockin:quick-lock", async () => engine.quickLock());
     ipcMain.handle("lockin:suggest", () => engine.suggest());
+    ipcMain.handle("lockin:checklist-add", (_e, text) => engine.addChecklistItem(text));
+    ipcMain.handle("lockin:checklist-toggle", (_e, id) => engine.toggleChecklistItem(id));
+    ipcMain.handle("lockin:checklist-remove", (_e, id) => engine.removeChecklistItem(id));
     ipcMain.handle("lockin:notes", (_e, notes) => {
       engine.setNotes(notes);
       return true;

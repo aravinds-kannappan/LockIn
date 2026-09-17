@@ -14,6 +14,8 @@ const state = {
   blockedEvents: [],
   elapsedMs: 0,
   blockedAttempts: 0,
+  checklist: [],
+  checklistDone: 0,
   recap: null,
   pacEnabled: false,
   stats: {},
@@ -24,6 +26,7 @@ let setupError = null;
 let suggesting = false;
 let endingOpen = false;
 let endNote = "";
+let newItemText = "";
 let lockStep = 0;
 let lockStepTimer = null;
 let clockTimer = null;
@@ -140,6 +143,8 @@ function lockingView() {
 }
 
 function lockedView() {
+  const items = state.checklist || [];
+  const done = items.filter((t) => t.done).length;
   const events = (state.blockedEvents || []).slice().reverse();
   return `
     <div class="agent">
@@ -151,24 +156,42 @@ function lockedView() {
       </div>
       <div class="locked-task">${escapeHtml(state.task)}</div>
       <div class="agent-body">
-        <div class="blocked-section">
-          <p class="section-label">Blocked attempts <span class="count-badge">${state.blockedAttempts || 0}</span></p>
-          <div class="blocked-feed">
-            ${
-              events.length
-                ? events
-                    .map(
-                      (e) => `
-                <div class="blocked-item">
-                  <span class="blocked-name">${escapeHtml(e.name || e.host)}</span>
-                  <span class="blocked-meta">${escapeHtml(e.source)} · ${timeAgo(e.at)}</span>
-                </div>`,
-                    )
-                    .join("")
-                : `<p class="empty-feed">No blocked sites yet. Social media tabs will be killed while you're locked in.</p>`
-            }
+        <div class="checklist-section">
+          <p class="section-label">Checklist ${items.length ? `<span class="count-badge">${done}/${items.length}</span>` : ""}</p>
+          <div class="checklist">
+            ${items
+              .map(
+                (t) => `
+              <div class="checklist-item ${t.done ? "is-done" : ""}" data-id="${escapeHtml(t.id)}">
+                <button class="check-btn" data-toggle="${escapeHtml(t.id)}">${t.done ? "✓" : ""}</button>
+                <span class="check-text">${escapeHtml(t.text)}</span>
+                <button class="remove-btn" data-remove="${escapeHtml(t.id)}">×</button>
+              </div>`,
+              )
+              .join("")}
           </div>
+          <form class="add-item-form" id="add-item-form">
+            <input type="text" id="new-item" placeholder="Add a task…" value="${escapeHtml(newItemText)}" autocomplete="off" />
+            <button class="btn add-btn" type="submit">+</button>
+          </form>
         </div>
+        ${
+          events.length
+            ? `<div class="blocked-section-mini">
+                <p class="section-label">Blocked <span class="count-badge">${state.blockedAttempts}</span></p>
+                <div class="blocked-feed-mini">
+                  ${events
+                    .slice(0, 3)
+                    .map(
+                      (e) =>
+                        `<span class="blocked-tag">${escapeHtml(e.name || e.host)}</span>`,
+                    )
+                    .join("")}
+                  ${events.length > 3 ? `<span class="blocked-tag muted">+${events.length - 3} more</span>` : ""}
+                </div>
+              </div>`
+            : ""
+        }
         <button class="btn end-btn" id="end-session">End Session</button>
       </div>
     </div>`;
@@ -176,6 +199,8 @@ function lockedView() {
 
 function recapView() {
   const recap = state.recap || {};
+  const tasks = recap.checklist || [];
+  const hasTasks = tasks.length > 0;
   return `
     <div class="agent">
       <div class="drag-region"></div>
@@ -194,11 +219,28 @@ function recapView() {
             <div class="recap-num">${formatDuration(recap.durationMs || 0)}</div>
             <div class="recap-label">Time</div>
           </div>
+          ${hasTasks ? `
+            <div class="recap-stat">
+              <div class="recap-num">${recap.checklistDone || 0}/${recap.checklistTotal || 0}</div>
+              <div class="recap-label">Tasks</div>
+            </div>
+          ` : ""}
           <div class="recap-stat">
             <div class="recap-num">${recap.blockedAttempts || 0}</div>
             <div class="recap-label">Blocked</div>
           </div>
         </div>
+        ${hasTasks ? `
+          <div class="recap-checklist">
+            <p class="section-label">Checklist</p>
+            ${tasks.map((t) => `
+              <div class="recap-task ${t.done ? "is-done" : ""}">
+                <span class="recap-check">${t.done ? "✓" : "–"}</span>
+                <span>${escapeHtml(t.text)}</span>
+              </div>
+            `).join("")}
+          </div>
+        ` : ""}
         ${recap.explanation ? `<div class="recap-note"><p class="section-label">Your note</p><p>${escapeHtml(recap.explanation)}</p></div>` : ""}
         <button class="btn primary" id="new-session" style="width:100%">New Session</button>
       </div>
@@ -261,6 +303,32 @@ function bind() {
 
   document.getElementById("login-item")?.addEventListener("change", async (e) => {
     await window.lockin.setLoginItem(e.target.checked);
+  });
+
+  document.getElementById("add-item-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = document.getElementById("new-item");
+    const text = input?.value || newItemText;
+    if (text.trim()) {
+      await window.lockin.addChecklistItem(text.trim());
+      newItemText = "";
+    }
+  });
+
+  document.getElementById("new-item")?.addEventListener("input", (e) => {
+    newItemText = e.target.value;
+  });
+
+  document.querySelectorAll("[data-toggle]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      await window.lockin.toggleChecklistItem(btn.getAttribute("data-toggle"));
+    });
+  });
+
+  document.querySelectorAll("[data-remove]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      await window.lockin.removeChecklistItem(btn.getAttribute("data-remove"));
+    });
   });
 
   document.getElementById("end-session")?.addEventListener("click", () => {

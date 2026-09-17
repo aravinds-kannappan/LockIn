@@ -38,6 +38,7 @@ function createEngine(options = {}) {
     startedAt: null,
     blockedEvents: [],
     escapeAttempts: 0,
+    checklist: [],
     extraHosts: learnedHosts(memory),
     apiPort,
     proxyPort,
@@ -84,6 +85,8 @@ function createEngine(options = {}) {
       apiPort,
       proxyPort,
       memoryPath,
+      checklist: state.checklist,
+      checklistDone: state.checklist.filter((t) => t.done).length,
       recap: state.recap || null,
       stats: {
         sessions: memory.sessions.length,
@@ -174,6 +177,7 @@ function createEngine(options = {}) {
     state.notes = "";
     state.blockedEvents = [];
     state.escapeAttempts = 0;
+    state.checklist = [];
     state.extraHosts = learnedHosts(memory);
     state.phase = "locking";
     state.locked = false;
@@ -197,6 +201,7 @@ function createEngine(options = {}) {
     const durationMs = state.startedAt ? Date.now() - state.startedAt : 0;
     const blockedHosts = [...new Set(state.blockedEvents.map((e) => e.host))];
     const trimmedNote = String(note || "").trim();
+    const checklistDone = state.checklist.filter((t) => t.done).length;
     const recap = {
       task: state.task,
       abandoned: !trimmedNote,
@@ -206,6 +211,9 @@ function createEngine(options = {}) {
       explanation: trimmedNote,
       verdict: trimmedNote ? "Session complete." : "Ended without a note.",
       blockedHosts,
+      checklist: state.checklist.map((t) => ({ text: t.text, done: t.done })),
+      checklistDone,
+      checklistTotal: state.checklist.length,
     };
     recordSession(memory, recap);
     persist();
@@ -224,7 +232,35 @@ function createEngine(options = {}) {
     state.notes = "";
     state.recap = null;
     state.blockedEvents = [];
+    state.checklist = [];
     state.escapeAttempts = 0;
+    emit("change");
+  }
+
+  function addChecklistItem(text) {
+    const trimmed = String(text || "").trim();
+    if (!trimmed) return null;
+    const item = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      text: trimmed,
+      done: false,
+    };
+    state.checklist.push(item);
+    emit("change");
+    return item;
+  }
+
+  function toggleChecklistItem(id) {
+    const item = state.checklist.find((t) => t.id === id);
+    if (item) {
+      item.done = !item.done;
+      emit("change");
+    }
+    return item;
+  }
+
+  function removeChecklistItem(id) {
+    state.checklist = state.checklist.filter((t) => t.id !== id);
     emit("change");
   }
 
@@ -250,6 +286,9 @@ function createEngine(options = {}) {
     lock,
     quickLock,
     suggest,
+    addChecklistItem,
+    toggleChecklistItem,
+    removeChecklistItem,
     endSession,
     reset,
     setNotes,
