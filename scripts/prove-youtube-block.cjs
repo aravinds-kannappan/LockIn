@@ -71,7 +71,7 @@ async function main() {
   const page = await get(
     `http://127.0.0.1:${engine.apiPort}/blocked?site=YouTube&host=youtube.com`,
   );
-  if (page.status !== 200 || !page.body.includes("YouTube is closed")) {
+  if (page.status !== 200 || !page.body.includes("YouTube is off limits")) {
     throw new Error("block page missing");
   }
   const pac = await get(`http://127.0.0.1:${engine.apiPort}/lockin.pac`);
