@@ -30,6 +30,11 @@ let newItemText = "";
 let lockStep = 0;
 let lockStepTimer = null;
 let clockTimer = null;
+let voiceAvailable = false;
+let listening = false;
+let speaking = false;
+let recognition = null;
+let audioCtx = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -123,7 +128,10 @@ function setupView() {
           <input type="checkbox" id="login-item" ${state.loginItemEnabled ? "checked" : ""} />
           <span>Open at login</span>
         </label>
-        <p class="shortcut-hint">⌘⇧L to summon · <code>lockin://start</code> for Siri Shortcuts</p>
+        <div class="voice-row">
+          ${micButton()}
+          <p class="shortcut-hint">⌘⇧L to summon · <code>lockin://start</code> for Siri Shortcuts</p>
+        </div>
       </div>
     </div>`;
 }
@@ -153,6 +161,7 @@ function lockedView() {
         <div class="locked-dot"></div>
         <span class="locked-label">Locked in</span>
         <span class="locked-timer">${formatDuration(state.elapsedMs)}</span>
+        ${micButton()}
       </div>
       <div class="locked-task">${escapeHtml(state.task)}</div>
       <div class="agent-body">
@@ -359,6 +368,14 @@ function bind() {
     }
   });
 
+  document.getElementById("mic-btn")?.addEventListener("click", () => {
+    if (listening) {
+      recognition?.stop();
+    } else {
+      startListening();
+    }
+  });
+
   document.getElementById("new-session")?.addEventListener("click", async () => {
     setupTask = "";
     endNote = "";
@@ -410,5 +427,129 @@ function applyState(next) {
   render();
 }
 
+function playPcm(data) {
+  if (!data || data.error || !data.samples) return;
+  if (!audioCtx) audioCtx = new AudioContext({ sampleRate: data.sampleRate || 24000 });
+  const buf = audioCtx.createBuffer(1, data.samples.length, data.sampleRate || 24000);
+  buf.getChannelData(0).set(new Float32Array(data.samples));
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(audioCtx.destination);
+  speaking = true;
+  render();
+  src.onended = () => { speaking = false; render(); };
+  src.start();
+}
+
+async function agentSpeak(text) {
+  const data = await window.lockin.speak(text);
+  playPcm(data);
+}
+
+function parseVoiceCommand(transcript) {
+  const t = transcript.toLowerCase().trim();
+
+  if (/^(lock\s*in|start|begin|focus)/.test(t)) {
+    return { action: "lock" };
+  }
+  if (/^(end|stop|finish|done|unlock|quit)/.test(t)) {
+    return { action: "end" };
+  }
+  if (/^(add|new)\s+(task\s+)?(.+)/i.test(t)) {
+    const m = t.match(/^(?:add|new)\s+(?:task\s+)?(.+)/i);
+    return { action: "add", text: m[1] };
+  }
+  if (/^(check|complete|toggle|mark)\s+(.+)/i.test(t)) {
+    const m = t.match(/^(?:check|complete|toggle|mark)\s+(.+)/i);
+    return { action: "check", text: m[1] };
+  }
+  if (/^(status|how|what|time|progress)/.test(t)) {
+    return { action: "status" };
+  }
+  return { action: "unknown", text: transcript };
+}
+
+async function handleVoiceCommand(transcript) {
+  const cmd = parseVoiceCommand(transcript);
+  const s = state;
+
+  if (cmd.action === "lock") {
+    if (s.locked) {
+      agentSpeak("You're already locked in. Keep going.");
+    } else {
+      await window.lockin.quickLock();
+      agentSpeak("Locked in. Let's go.");
+    }
+  } else if (cmd.action === "end") {
+    if (s.locked) {
+      await window.lockin.endSession("");
+      agentSpeak("Session ended. Nice work.");
+    } else {
+      agentSpeak("No session running right now.");
+    }
+  } else if (cmd.action === "add") {
+    if (s.locked) {
+      await window.lockin.addChecklistItem(cmd.text);
+      agentSpeak(`Added: ${cmd.text}`);
+    } else {
+      agentSpeak("Start a session first, then add tasks.");
+    }
+  } else if (cmd.action === "check") {
+    if (s.locked && s.checklist.length > 0) {
+      const needle = cmd.text.toLowerCase();
+      const item = s.checklist.find((t) => t.text.toLowerCase().includes(needle) && !t.done);
+      if (item) {
+        await window.lockin.toggleChecklistItem(item.id);
+        agentSpeak(`Checked off: ${item.text}`);
+      } else {
+        agentSpeak("I couldn't find that task.");
+      }
+    } else {
+      agentSpeak("No tasks to check right now.");
+    }
+  } else if (cmd.action === "status") {
+    if (s.locked) {
+      const mins = Math.floor((s.elapsedMs || 0) / 60000);
+      const done = (s.checklist || []).filter((t) => t.done).length;
+      const total = (s.checklist || []).length;
+      const taskPart = total > 0 ? `${done} of ${total} tasks done.` : "";
+      agentSpeak(`You've been locked in for ${mins} minutes. ${taskPart}`);
+    } else {
+      agentSpeak("No active session. Say lock in to start one.");
+    }
+  } else {
+    agentSpeak("I didn't catch that. Try saying add, check, status, lock in, or end.");
+  }
+}
+
+function startListening() {
+  if (listening || !("webkitSpeechRecognition" in window)) return;
+  if (!recognition) {
+    const SR = window.webkitSpeechRecognition;
+    recognition = new SR();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    recognition.onresult = (e) => {
+      const transcript = e.results[0][0].transcript;
+      listening = false;
+      render();
+      handleVoiceCommand(transcript);
+    };
+    recognition.onerror = () => { listening = false; render(); };
+    recognition.onend = () => { listening = false; render(); };
+  }
+  listening = true;
+  render();
+  recognition.start();
+}
+
+function micButton() {
+  if (!voiceAvailable) return "";
+  const cls = listening ? "mic-btn is-listening" : speaking ? "mic-btn is-speaking" : "mic-btn";
+  return `<button class="${cls}" id="mic-btn" title="Voice command">${listening ? "●" : "🎙"}</button>`;
+}
+
+window.lockin.voiceAvailable().then((v) => { voiceAvailable = v; render(); });
 window.lockin.onState(applyState);
 window.lockin.getState().then(applyState);

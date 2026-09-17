@@ -19,4 +19,6 @@ contextBridge.exposeInMainWorld("lockin", {
   endSession: (note) => ipcRenderer.invoke("lockin:end-session", note),
   reset: () => ipcRenderer.invoke("lockin:reset"),
   setLoginItem: (enabled) => ipcRenderer.invoke("lockin:login-item", enabled),
+  speak: (text) => ipcRenderer.invoke("lockin:speak", text),
+  voiceAvailable: () => ipcRenderer.invoke("lockin:voice-available"),
 });

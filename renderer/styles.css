@@ -475,3 +475,41 @@ textarea:focus, input:focus {
   border-radius: 4px;
   font-size: 11px;
 }
+
+.voice-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.voice-row .shortcut-hint { margin-top: 0; }
+
+.mic-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 14px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.mic-btn:hover { border-color: var(--accent); color: var(--accent); }
+.mic-btn.is-listening {
+  background: var(--red-dim);
+  border-color: var(--red);
+  color: var(--red);
+  animation: pulse-mic 1s ease-in-out infinite;
+}
+.mic-btn.is-speaking {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+@keyframes pulse-mic {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}

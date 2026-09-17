@@ -2,8 +2,10 @@
 
 const path = require("path");
 const { app, BrowserWindow, ipcMain, screen, globalShortcut, Tray, Menu, nativeImage } = require("electron");
+const { systemPreferences } = require("electron");
 const { createEngine } = require("./engine");
 const { enableLoginItem, disableLoginItem } = require("./login");
+const voice = require("./voice");
 
 const REPO_ROOT = path.join(__dirname, "..");
 
@@ -175,6 +177,20 @@ if (!gotLock) {
       await syncLoginItem(next);
       return engine.getPublic();
     });
+
+    ipcMain.handle("lockin:speak", async (_e, text) => {
+      try {
+        return await voice.speak(text);
+      } catch (err) {
+        return { error: err.message };
+      }
+    });
+
+    ipcMain.handle("lockin:voice-available", () => voice.hasApiKey());
+
+    if (systemPreferences.askForMediaAccess) {
+      systemPreferences.askForMediaAccess("microphone").catch(() => {});
+    }
   });
 
   app.on("before-quit", () => {
